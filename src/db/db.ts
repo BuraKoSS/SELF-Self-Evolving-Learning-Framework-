@@ -1,52 +1,43 @@
 import Dexie, { Table } from 'dexie';
 
-// 1. ARAYÜZLER (INTERFACES)
-// Dokümandaki "Entities: Goal, Plan, Session" yapısına uygun veri tipleri 
+// --- 1. ARAYÜZLER (Interfaces) ---
+// Proje dokümanındaki "Core Domain" varlıklarına uygun veri tipleri
 
 export interface Goal {
   id?: number;
-  title: string;       // Ders adı veya Hedef (Örn: "CENG472 Secure Coding")
-  targetHours: number; // Haftalık hedeflenen çalışma saati [cite: 18]
-  deadline?: Date;     // Sınav veya proje teslim tarihi [cite: 18]
-  priority: 'low' | 'medium' | 'high'; // Öncelik seviyesi
-}
-
-export interface Constraint {
-  id?: number;
-  type: 'busy_hours' | 'max_daily_load' | 'day_off'; // Kısıt türü
-  value: string | number; // Örn: "Sunday" veya "4 hours"
-  description: string;    // Kullanıcı için açıklama
+  title: string;       // Ders adı (Örn: "Biçimsel Diller")
+  targetHours: number; // Haftalık hedef (Örn: 5 saat)
+  deadline?: Date;     // Sınav tarihi
+  priority: 'low' | 'medium' | 'high';
 }
 
 export interface Session {
   id?: number;
-  goalId: number;      // Hangi derse çalışıldığı
+  goalId: number;      // Hangi derse ait olduğu
   startTime: Date;
-  duration: number;    // Dakika cinsinden süre (Pomodoro verisi için)
+  duration: number;    // Dakika cinsinden çalışma süresi
   status: 'completed' | 'interrupted';
 }
 
-// 2. VERİTABANI SINIFI
-// IndexedDB'yi yöneten ana sınıfımız
+// --- 2. VERİTABANI SINIFI ---
+// Dokümandaki "Offline-first using IndexedDB" gereksinimi için yapı
 
 export class SelfDatabase extends Dexie {
-  // Tablo tanımları
+  // Tablolarımız
   goals!: Table<Goal>;
-  constraints!: Table<Constraint>;
   sessions!: Table<Session>; 
 
   constructor() {
-    super('SelfDatabase'); // Veritabanı adı
+    super('SelfDatabase'); // Tarayıcıda görünecek veritabanı adı
     
-    // Şema Tanımı (Schema Definition)
-    // Sadece indekslenecek (aramada kullanılacak) alanları buraya yazıyoruz.
+    // Şema Tanımı (Schema)
+    // Sadece arama yapacağımız alanları buraya yazıyoruz.
     this.version(1).stores({
-      goals: '++id, title, deadline, priority', // id otomatik artar (++id)
-      constraints: '++id, type',
-      sessions: '++id, goalId, startTime, status' 
+      goals: '++id, title, deadline, priority', // ++id: otomatik artan numara
+      sessions: '++id, goalId, startTime' 
     });
   }
 }
 
-// Veritabanı örneğini dışa aktar
+// Veritabanını dışa aktar
 export const db = new SelfDatabase();
