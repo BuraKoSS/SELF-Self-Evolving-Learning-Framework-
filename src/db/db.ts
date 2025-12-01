@@ -1,43 +1,33 @@
 import Dexie, { Table } from 'dexie';
 
-// --- 1. ARAYÜZLER (Interfaces) ---
-// Proje dokümanındaki "Core Domain" varlıklarına uygun veri tipleri
-
 export interface Goal {
   id?: number;
-  title: string;       // Ders adı (Örn: "Biçimsel Diller")
-  targetHours: number; // Haftalık hedef (Örn: 5 saat)
-  deadline?: Date;     // Sınav tarihi
+  title: string;
+  targetHours: number;
   priority: 'low' | 'medium' | 'high';
+  deadline?: Date;
 }
 
-export interface Session {
+// YENİ EKLENEN KISIM: Kısıtlar (Örn: Bugün meşgulüm)
+export interface Constraint {
   id?: number;
-  goalId: number;      // Hangi derse ait olduğu
-  startTime: Date;
-  duration: number;    // Dakika cinsinden çalışma süresi
-  status: 'completed' | 'interrupted';
+  title: string;       // Örn: "Salı Basketbol Antrenmanı"
+  type: 'busy' | 'day_off'; 
+  duration: number;    // Örn: 2 saat
 }
-
-// --- 2. VERİTABANI SINIFI ---
-// Dokümandaki "Offline-first using IndexedDB" gereksinimi için yapı
 
 export class SelfDatabase extends Dexie {
-  // Tablolarımız
   goals!: Table<Goal>;
-  sessions!: Table<Session>; 
+  constraints!: Table<Constraint>; // Yeni tablo
 
   constructor() {
-    super('SelfDatabase'); // Tarayıcıda görünecek veritabanı adı
-    
-    // Şema Tanımı (Schema)
-    // Sadece arama yapacağımız alanları buraya yazıyoruz.
-    this.version(1).stores({
-      goals: '++id, title, deadline, priority', // ++id: otomatik artan numara
-      sessions: '++id, goalId, startTime' 
+    super('SelfDatabase');
+    // Versiyonu 2'ye çektik ki tarayıcı veritabanını güncellesin
+    this.version(2).stores({
+      goals: '++id, title, deadline, priority',
+      constraints: '++id, type' // Yeni indeks
     });
   }
 }
 
-// Veritabanını dışa aktar
 export const db = new SelfDatabase();
