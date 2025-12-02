@@ -164,8 +164,8 @@ export default function WeeklyPlanner() {
 
     const handleDragStart = (dayIndex: number, slotIndex: number) => {
         const slot = plan[dayIndex].slots[slotIndex];
-        // Only study blocks are draggable
-        if (slot.type !== 'study') return;
+        // Both study blocks and constraints are draggable; free slots are not.
+        if (slot.type === 'free') return;
         setDraggedSlot({ dayIndex, slotIndex });
     };
 
@@ -175,8 +175,8 @@ export default function WeeklyPlanner() {
         slotIndex: number
     ) => {
         const slot = plan[dayIndex].slots[slotIndex];
-        // Do not allow dropping on "busy" (constraint) slots
-        if (slot.type === 'busy') return;
+        // Only allow dropping onto free slots
+        if (slot.type !== 'free') return;
         e.preventDefault(); // allow drop
     };
 
@@ -207,16 +207,16 @@ export default function WeeklyPlanner() {
             const source = copy[draggedSlot.dayIndex].slots[draggedSlot.slotIndex];
             const target = copy[dayIndex].slots[slotIndex];
 
-            // Only move study blocks and never overwrite a busy slot
-            if (source.type !== 'study') return prev;
-            if (target.type === 'busy') return prev;
+            // Only move from non-free to free
+            if (source.type === 'free') return prev;
+            if (target.type !== 'free') return prev;
 
             // MOVE behavior:
-            //  - target becomes new study block (keeping priority)
+            //  - target becomes same type as source (study or busy)
             //  - source becomes free
             copy[dayIndex].slots[slotIndex] = {
                 ...target,
-                type: 'study',
+                type: source.type,
                 label: source.label,
                 priority: source.priority,
             };
@@ -257,46 +257,52 @@ export default function WeeklyPlanner() {
                     <p className="text-sm text-gray-500 mt-1">
                         Rules: Max {MAX_STUDY_HOURS_PER_DAY} hours of study per day. First,
                         constraint (busy) slots are blocked, then study goals are distributed
-                        across the week. The user can drag &amp; drop study blocks to adjust
-                        the schedule manually. Colors indicate priority (HIGH / MEDIUM / LOW).
+                        across the week.
+                    </p>
+                    <p className="text-sm text-gray-500 mt-1">
+                        The user can drag &amp; drop both study blocks and
+                        constraints onto free slots to adjust the schedule manually. Colors
+                        indicate priority (HIGH / MEDIUM / LOW).
                     </p>
                 </div>
 
-                <div className="text-xs text-gray-600 bg-white rounded-lg shadow-sm border px-4 py-2 flex flex-col gap-1">
-          <span>
-            Total study target:{' '}
-              <span className="font-semibold">{totalStudyHours} hours</span>
-          </span>
+                <div
+                    className="text-xs text-gray-600 bg-white rounded-lg shadow-sm border px-4 py-2 flex flex-col gap-1">
+                  <span>
+                    Total study target:{' '}
+                      <span className="font-semibold">{totalStudyHours} hours</span>
+                  </span>
                     <span>
-            Total constrained time:{' '}
+                    Total constrained time:{' '}
                         <span className="font-semibold">{totalBusyHours} hours</span>
-          </span>
+                  </span>
                 </div>
             </div>
 
             {/* Legend */}
-            <div className="flex flex-wrap items-center gap-3 text-[11px] mb-4">
-        <span className="inline-flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-red-50 border border-red-200" />
-          Study Block – HIGH priority
-        </span>
-                <span className="inline-flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-yellow-50 border border-yellow-200" />
-          Study Block – MEDIUM priority
-        </span>
-                <span className="inline-flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-green-50 border border-green-200" />
-          Study Block – LOW priority
-        </span>
-                <span className="inline-flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-orange-50 border border-orange-200" />
-          Constraint / Busy Time
-        </span>
-                <span className="inline-flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-gray-50 border border-dashed border-gray-200" />
-          Free / Unplanned
-        </span>
+            <div className="flex flex-wrap items-center gap-4 mb-4 text-xs text-gray-700">
+              <span className="inline-flex items-center gap-2 font-medium">
+                <span className="w-3 h-3 rounded bg-red-50 border border-red-200" />
+                Study Block – HIGH priority
+              </span>
+                            <span className="inline-flex items-center gap-2 font-medium">
+                <span className="w-3 h-3 rounded bg-yellow-50 border border-yellow-200" />
+                Study Block – MEDIUM priority
+              </span>
+                            <span className="inline-flex items-center gap-2 font-medium">
+                <span className="w-3 h-3 rounded bg-green-50 border border-green-200" />
+                Study Block – LOW priority
+              </span>
+                            <span className="inline-flex items-center gap-2 font-medium">
+                <span className="w-3 h-3 rounded bg-orange-50 border border-orange-200" />
+                Constraint / Busy Time (draggable)
+              </span>
+                            <span className="inline-flex items-center gap-2 font-medium">
+                <span className="w-3 h-3 rounded bg-gray-50 border border-dashed border-gray-200" />
+                Free / Unplanned
+              </span>
             </div>
+
 
             {/* Weekly grid */}
             <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-3">
@@ -317,13 +323,13 @@ export default function WeeklyPlanner() {
                                     cls +=
                                         ' bg-gray-50 text-gray-400 border-dashed border-gray-200';
                                 } else if (slot.type === 'busy') {
-                                    cls += ' bg-orange-50 text-orange-700 border-orange-200';
+                                    cls += ' bg-orange-50 text-orange-700 border-orange-200 cursor-move';
                                 } else if (slot.type === 'study') {
                                     cls +=
                                         ' ' + getStudyClassesByPriority(slot.priority) + ' cursor-move';
                                 }
 
-                                const draggable = slot.type === 'study';
+                                const draggable = slot.type !== 'free';
 
                                 return (
                                     <div
