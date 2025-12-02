@@ -1,6 +1,7 @@
 'use client';
 import GoalManager from '../components/GoalManager';
 import WeeklyPlanner from '../components/WeeklyPlanner';
+import PomodoroPage from './pomodoro/page';
 
 export default function Home() {
     return (
@@ -16,6 +17,14 @@ export default function Home() {
 
             {/* CRUD ekranı */}
             <GoalManager />
+            
+             {/* pomodoro zamanlayıcı */}
+            <div className="mt-16 border-t pt-10">
+                <h2 className="text-3xl font-bold text-center text-gray-800 mb-8">
+                    Odaklanma Zamanı!
+                </h2>
+                <PomodoroPage /> 
+            </div>
 
             {/* Haftalık Plan & Scheduler */}
             <div className="mt-16 border-t pt-10">
