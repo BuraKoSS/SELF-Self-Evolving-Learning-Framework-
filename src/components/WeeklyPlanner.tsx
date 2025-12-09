@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, Goal, Constraint } from '../db/db';
+import { logEvent } from '../observer/logging';
+import { EVENT_TYPES } from '../observer/events';
 
 const WEEK_DAYS = [
     'Pazartesi',
@@ -151,9 +153,23 @@ export default function WeeklyPlanner() {
     // Whenever goals or constraints change, rebuild baseline plan
     useEffect(() => {
         if (goals && constraints) {
-            setPlan(buildWeeklyPlan(goals, constraints));
+            const nextPlan = buildWeeklyPlan(goals, constraints);
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setPlan(nextPlan);
+
+            logEvent(
+                EVENT_TYPES.SCHEDULER_RUN,
+                {
+                    goalsCount: goals.length,
+                    constraintsCount: constraints.length,
+                    totalTargetHours: goals.reduce((s, g) => s + (g.targetHours || 0), 0),
+                    totalConstraintHours: constraints.reduce((s, c) => s + (c.duration || 0), 0),
+                },
+                'WeeklyPlanner'
+            );
         }
     }, [goals, constraints]);
+
 
     const totalStudyHours =
         goals?.reduce((sum, g) => sum + (g.targetHours || 0), 0) ?? 0;
@@ -197,6 +213,26 @@ export default function WeeklyPlanner() {
             return;
         }
 
+        // Snapshot from current plan for logging + validation
+        const currentSource = plan[draggedSlot.dayIndex]?.slots[draggedSlot.slotIndex];
+        const currentTarget = plan[dayIndex]?.slots[slotIndex];
+
+        if (!currentSource || !currentTarget) {
+            setDraggedSlot(null);
+            return;
+        }
+
+        // Only move from non-free to free
+        if (currentSource.type === 'free') {
+            setDraggedSlot(null);
+            return;
+        }
+        if (currentTarget.type !== 'free') {
+            setDraggedSlot(null);
+            return;
+        }
+
+        // Update UI state
         setPlan((prev) => {
             // Deep copy so we don’t mutate previous state
             const copy = prev.map((d) => ({
@@ -206,10 +242,6 @@ export default function WeeklyPlanner() {
 
             const source = copy[draggedSlot.dayIndex].slots[draggedSlot.slotIndex];
             const target = copy[dayIndex].slots[slotIndex];
-
-            // Only move from non-free to free
-            if (source.type === 'free') return prev;
-            if (target.type !== 'free') return prev;
 
             // MOVE behavior:
             //  - target becomes same type as source (study or busy)
@@ -230,6 +262,25 @@ export default function WeeklyPlanner() {
 
             return copy;
         });
+
+        // LOG: Slot moved (non-blocking)
+        logEvent(
+            EVENT_TYPES.SLOT_MOVED,
+            {
+                from: {
+                    day: WEEK_DAYS[draggedSlot.dayIndex],
+                    hour: currentSource.hour,
+                    type: currentSource.type,
+                    label: currentSource.label,
+                    priority: currentSource.priority,
+                },
+                to: {
+                    day: WEEK_DAYS[dayIndex],
+                    hour: currentTarget.hour,
+                },
+            },
+            'WeeklyPlanner'
+        );
 
         setDraggedSlot(null);
     };
@@ -266,43 +317,41 @@ export default function WeeklyPlanner() {
                     </p>
                 </div>
 
-                <div
-                    className="text-xs text-gray-600 bg-white rounded-lg shadow-sm border px-4 py-2 flex flex-col gap-1">
-                  <span>
-                    Total study target:{' '}
-                      <span className="font-semibold">{totalStudyHours} hours</span>
-                  </span>
+                <div className="text-xs text-gray-600 bg-white rounded-lg shadow-sm border px-4 py-2 flex flex-col gap-1">
                     <span>
-                    Total constrained time:{' '}
+                        Total study target:{' '}
+                        <span className="font-semibold">{totalStudyHours} hours</span>
+                    </span>
+                    <span>
+                        Total constrained time:{' '}
                         <span className="font-semibold">{totalBusyHours} hours</span>
-                  </span>
+                    </span>
                 </div>
             </div>
 
             {/* Legend */}
             <div className="flex flex-wrap items-center gap-4 mb-4 text-xs text-gray-700">
-              <span className="inline-flex items-center gap-2 font-medium">
-                <span className="w-3 h-3 rounded bg-red-50 border border-red-200" />
-                Study Block – HIGH priority
-              </span>
-                            <span className="inline-flex items-center gap-2 font-medium">
-                <span className="w-3 h-3 rounded bg-yellow-50 border border-yellow-200" />
-                Study Block – MEDIUM priority
-              </span>
-                            <span className="inline-flex items-center gap-2 font-medium">
-                <span className="w-3 h-3 rounded bg-green-50 border border-green-200" />
-                Study Block – LOW priority
-              </span>
-                            <span className="inline-flex items-center gap-2 font-medium">
-                <span className="w-3 h-3 rounded bg-orange-50 border border-orange-200" />
-                Constraint / Busy Time (draggable)
-              </span>
-                            <span className="inline-flex items-center gap-2 font-medium">
-                <span className="w-3 h-3 rounded bg-gray-50 border border-dashed border-gray-200" />
-                Free / Unplanned
-              </span>
+                <span className="inline-flex items-center gap-2 font-medium">
+                    <span className="w-3 h-3 rounded bg-red-50 border border-red-200" />
+                    Study Block – HIGH priority
+                </span>
+                <span className="inline-flex items-center gap-2 font-medium">
+                    <span className="w-3 h-3 rounded bg-yellow-50 border border-yellow-200" />
+                    Study Block – MEDIUM priority
+                </span>
+                <span className="inline-flex items-center gap-2 font-medium">
+                    <span className="w-3 h-3 rounded bg-green-50 border border-green-200" />
+                    Study Block – LOW priority
+                </span>
+                <span className="inline-flex items-center gap-2 font-medium">
+                    <span className="w-3 h-3 rounded bg-orange-50 border border-orange-200" />
+                    Constraint / Busy Time (draggable)
+                </span>
+                <span className="inline-flex items-center gap-2 font-medium">
+                    <span className="w-3 h-3 rounded bg-gray-50 border border-dashed border-gray-200" />
+                    Free / Unplanned
+                </span>
             </div>
-
 
             {/* Weekly grid */}
             <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-3">
@@ -323,10 +372,13 @@ export default function WeeklyPlanner() {
                                     cls +=
                                         ' bg-gray-50 text-gray-400 border-dashed border-gray-200';
                                 } else if (slot.type === 'busy') {
-                                    cls += ' bg-orange-50 text-orange-700 border-orange-200 cursor-move';
+                                    cls +=
+                                        ' bg-orange-50 text-orange-700 border-orange-200 cursor-move';
                                 } else if (slot.type === 'study') {
                                     cls +=
-                                        ' ' + getStudyClassesByPriority(slot.priority) + ' cursor-move';
+                                        ' ' +
+                                        getStudyClassesByPriority(slot.priority) +
+                                        ' cursor-move';
                                 }
 
                                 const draggable = slot.type !== 'free';
@@ -344,15 +396,15 @@ export default function WeeklyPlanner() {
                                         }
                                         onDrop={(e) => handleDrop(e, dayIndex, slotIndex)}
                                     >
-                    <span className="font-mono mr-2">
-                      {slot.hour.toString().padStart(2, '0')}:00
-                    </span>
+                                        <span className="font-mono mr-2">
+                                            {slot.hour.toString().padStart(2, '0')}:00
+                                        </span>
                                         <span className="truncate flex-1">
-                      {slot.type === 'free'
-                          ? 'Boş'
-                          : slot.label ??
-                          (slot.type === 'busy' ? 'Kısıtlı' : '')}
-                    </span>
+                                            {slot.type === 'free'
+                                                ? 'Boş'
+                                                : slot.label ??
+                                                (slot.type === 'busy' ? 'Kısıtlı' : '')}
+                                        </span>
                                     </div>
                                 );
                             })}

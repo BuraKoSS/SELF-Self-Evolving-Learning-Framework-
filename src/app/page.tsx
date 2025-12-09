@@ -2,6 +2,7 @@
 import GoalManager from '../components/GoalManager';
 import WeeklyPlanner from '../components/WeeklyPlanner';
 import PomodoroPage from './pomodoro/page';
+import LogPanel from '../components/LogPanel';
 
 export default function Home() {
     return (
@@ -17,19 +18,22 @@ export default function Home() {
 
             {/* CRUD ekranı */}
             <GoalManager />
-            
-             {/* pomodoro zamanlayıcı */}
+
+            {/* pomodoro zamanlayıcı */}
             <div className="mt-16 border-t pt-10">
                 <h2 className="text-3xl font-bold text-center text-gray-800 mb-8">
                     Odaklanma Zamanı!
                 </h2>
-                <PomodoroPage /> 
+                <PomodoroPage />
             </div>
 
             {/* Haftalık Plan & Scheduler */}
             <div className="mt-16 border-t pt-10">
                 <WeeklyPlanner />
             </div>
+
+            {/* Observer Logs (temporary dev panel) */}
+            <LogPanel />
         </main>
     );
 }
