@@ -39,10 +39,10 @@ interface DayPlan {
 /**
  * Build an initial weekly plan from goals and constraints.
  * Rules:
- *  - Start with all slots "free"
- *  - Place constraint ("busy") hours on evening slots first
- *  - Distribute remaining study hours across the week (round-robin)
- *  - Max X study hours per day (MAX_STUDY_HOURS_PER_DAY)
+ * - Start with all slots "free"
+ * - Place constraint ("busy") hours on evening slots first (Respecting 'day' if exists)
+ * - Distribute remaining study hours across the week (round-robin)
+ * - Max X study hours per day (MAX_STUDY_HOURS_PER_DAY)
  */
 function buildWeeklyPlan(
     goals: Goal[] = [],
@@ -60,27 +60,41 @@ function buildWeeklyPlan(
         ),
     }));
 
-    // 2) Calculate total busy hours from constraints and block them on evenings
-    const totalBusyHours = constraints.reduce(
-        (sum, c) => sum + (c.duration || 0),
-        0
-    );
-    let remainingBusy = totalBusyHours;
+    // 2) Place constraints (Updated to use specific Titles and Days)
+    // We iterate through each constraint to preserve its identity (Title).
+    
+    for (const c of constraints) {
+        let remaining = c.duration || 0;
+        
+        // Kısıtın özel bir günü var mı kontrol et (Örn: "Pazartesi")
+        const targetDayIndex = WEEK_DAYS.indexOf((c as any).day); 
 
-    // Heuristic: fill busy hours from latest to earliest so daytime remains clearer for studying.
-    for (
-        let hour = END_HOUR - 1;
-        hour >= START_HOUR && remainingBusy > 0;
-        hour--
-    ) {
-        const slotIndex = hour - START_HOUR;
-        for (let d = 0; d < days.length && remainingBusy > 0; d++) {
-            const slot = days[d].slots[slotIndex];
-            if (slot.type === 'free') {
-                slot.type = 'busy';
-                slot.label = 'Kısıt';
-                slot.priority = undefined;
-                remainingBusy--;
+        // Heuristic: Akşamdan (21:00) sabaha doğru boş yer ara
+        for (let h = END_HOUR - 1; h >= START_HOUR && remaining > 0; h--) {
+            const slotIndex = h - START_HOUR;
+
+            if (targetDayIndex !== -1) {
+                // --- SENARYO A: Belirli Bir Gün Seçilmiş (Örn: Salı) ---
+                // Sadece o günün sütununa bak
+                const slot = days[targetDayIndex].slots[slotIndex];
+                if (slot.type === 'free') {
+                    slot.type = 'busy';
+                    slot.label = c.title; // - Kısıtın gerçek adını bas
+                    slot.priority = undefined;
+                    remaining--;
+                }
+            } else {
+                // --- SENARYO B: Gün Seçilmemiş (Genel Kısıt) ---
+                // Tüm günlere (Pzt->Paz) sırayla bak (Round-robin)
+                for (let d = 0; d < days.length && remaining > 0; d++) {
+                    const slot = days[d].slots[slotIndex];
+                    if (slot.type === 'free') {
+                        slot.type = 'busy';
+                        slot.label = c.title; // Kısıtın gerçek adını bas
+                        slot.priority = undefined;
+                        remaining--;
+                    }
+                }
             }
         }
     }
@@ -90,7 +104,8 @@ function buildWeeklyPlan(
         id: g.id,
         title: g.title,
         priority: g.priority,
-        remaining: g.targetHours, // remaining hours to schedule
+        status: g.status, // Durumu al
+        remaining: g.targetHours,
     }));
 
     if (goalStates.length === 0) return days;
@@ -103,33 +118,33 @@ function buildWeeklyPlan(
         for (let s = 0; s < days[d].slots.length; s++) {
             const slot = days[d].slots[s];
 
-            // Skip if slot already blocked or daily limit reached
+            // Skip if busy or daily limit reached
             if (slot.type !== 'free') continue;
             if (usedToday >= MAX_STUDY_HOURS_PER_DAY) continue;
 
-            // Stop if there is no remaining study hour at all
-            if (!goalStates.some((g) => g.remaining > 0)) break;
+            // Stop if no remaining goals
+            if (!goalStates.some((g) => g.remaining > 0 && g.status !== 'postponed')) break;
 
-            // Round-robin: find next goal that still has remaining hours
+            // Round-robin: find next active goal
             let loops = 0;
             while (
-                goalStates[currentGoalIndex].remaining <= 0 &&
+                (goalStates[currentGoalIndex].remaining <= 0 || goalStates[currentGoalIndex].status === 'postponed') &&
                 loops < goalStates.length
-                ) {
+            ) {
                 currentGoalIndex = (currentGoalIndex + 1) % goalStates.length;
                 loops++;
             }
 
-            if (goalStates[currentGoalIndex].remaining <= 0) break;
+            // Double check if we found a valid goal
+            if (goalStates[currentGoalIndex].remaining <= 0 || goalStates[currentGoalIndex].status === 'postponed') break;
 
-            // Assign this slot to the selected goal
+            // Assign slot
             slot.type = 'study';
             slot.label = goalStates[currentGoalIndex].title;
             slot.priority = goalStates[currentGoalIndex].priority;
             goalStates[currentGoalIndex].remaining -= 1;
             usedToday++;
 
-            // Move to next goal for fairness (round-robin)
             currentGoalIndex = (currentGoalIndex + 1) % goalStates.length;
         }
     }
@@ -143,18 +158,15 @@ export default function WeeklyPlanner() {
     const goals = useLiveQuery(() => db.goals.toArray());
     const constraints = useLiveQuery(() => db.constraints?.toArray() ?? []);
 
-    // Plan is kept in local state so the user can adjust it via drag & drop
     const [plan, setPlan] = useState<DayPlan[]>([]);
     const [draggedSlot, setDraggedSlot] = useState<{
         dayIndex: number;
         slotIndex: number;
     } | null>(null);
 
-    // Whenever goals or constraints change, rebuild baseline plan
     useEffect(() => {
         if (goals && constraints) {
             const nextPlan = buildWeeklyPlan(goals, constraints);
-            // eslint-disable-next-line react-hooks/set-state-in-effect
             setPlan(nextPlan);
 
             logEvent(
@@ -162,248 +174,124 @@ export default function WeeklyPlanner() {
                 {
                     goalsCount: goals.length,
                     constraintsCount: constraints.length,
-                    totalTargetHours: goals.reduce((s, g) => s + (g.targetHours || 0), 0),
-                    totalConstraintHours: constraints.reduce((s, c) => s + (c.duration || 0), 0),
                 },
                 'WeeklyPlanner'
             );
         }
     }, [goals, constraints]);
 
+    const totalStudyHours = goals?.reduce((sum, g) => sum + (g.targetHours || 0), 0) ?? 0;
+    const totalBusyHours = constraints?.reduce((sum, c) => sum + (c.duration || 0), 0) ?? 0;
 
-    const totalStudyHours =
-        goals?.reduce((sum, g) => sum + (g.targetHours || 0), 0) ?? 0;
-    const totalBusyHours =
-        constraints?.reduce((sum, c) => sum + (c.duration || 0), 0) ?? 0;
-
-    // ---------- Drag & Drop handlers ----------
-
+    // ---------- Drag & Drop Handlers (Aynı Kalıyor) ----------
     const handleDragStart = (dayIndex: number, slotIndex: number) => {
         const slot = plan[dayIndex].slots[slotIndex];
-        // Both study blocks and constraints are draggable; free slots are not.
         if (slot.type === 'free') return;
         setDraggedSlot({ dayIndex, slotIndex });
     };
 
-    const handleDragOver = (
-        e: React.DragEvent<HTMLDivElement>,
-        dayIndex: number,
-        slotIndex: number
-    ) => {
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>, dayIndex: number, slotIndex: number) => {
         const slot = plan[dayIndex].slots[slotIndex];
-        // Only allow dropping onto free slots
         if (slot.type !== 'free') return;
-        e.preventDefault(); // allow drop
+        e.preventDefault(); 
     };
 
-    const handleDrop = (
-        e: React.DragEvent<HTMLDivElement>,
-        dayIndex: number,
-        slotIndex: number
-    ) => {
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>, dayIndex: number, slotIndex: number) => {
         e.preventDefault();
         if (!draggedSlot) return;
-
-        // If dropped on the same place, do nothing
-        if (
-            draggedSlot.dayIndex === dayIndex &&
-            draggedSlot.slotIndex === slotIndex
-        ) {
+        if (draggedSlot.dayIndex === dayIndex && draggedSlot.slotIndex === slotIndex) {
             setDraggedSlot(null);
             return;
         }
 
-        // Snapshot from current plan for logging + validation
         const currentSource = plan[draggedSlot.dayIndex]?.slots[draggedSlot.slotIndex];
         const currentTarget = plan[dayIndex]?.slots[slotIndex];
 
-        if (!currentSource || !currentTarget) {
+        if (!currentSource || !currentTarget || currentSource.type === 'free' || currentTarget.type !== 'free') {
             setDraggedSlot(null);
             return;
         }
 
-        // Only move from non-free to free
-        if (currentSource.type === 'free') {
-            setDraggedSlot(null);
-            return;
-        }
-        if (currentTarget.type !== 'free') {
-            setDraggedSlot(null);
-            return;
-        }
-
-        // Update UI state
         setPlan((prev) => {
-            // Deep copy so we don’t mutate previous state
-            const copy = prev.map((d) => ({
-                ...d,
-                slots: d.slots.map((s) => ({ ...s })),
-            }));
-
+            const copy = prev.map((d) => ({ ...d, slots: d.slots.map((s) => ({ ...s })) }));
             const source = copy[draggedSlot.dayIndex].slots[draggedSlot.slotIndex];
             const target = copy[dayIndex].slots[slotIndex];
 
-            // MOVE behavior:
-            //  - target becomes same type as source (study or busy)
-            //  - source becomes free
-            copy[dayIndex].slots[slotIndex] = {
-                ...target,
-                type: source.type,
-                label: source.label,
-                priority: source.priority,
-            };
-
-            copy[draggedSlot.dayIndex].slots[draggedSlot.slotIndex] = {
-                ...source,
-                type: 'free',
-                label: undefined,
-                priority: undefined,
-            };
+            // Swap logic
+            copy[dayIndex].slots[slotIndex] = { ...target, type: source.type, label: source.label, priority: source.priority };
+            copy[draggedSlot.dayIndex].slots[draggedSlot.slotIndex] = { ...source, type: 'free', label: undefined, priority: undefined };
 
             return copy;
         });
 
-        // LOG: Slot moved (non-blocking)
-        logEvent(
-            EVENT_TYPES.SLOT_MOVED,
-            {
-                from: {
-                    day: WEEK_DAYS[draggedSlot.dayIndex],
-                    hour: currentSource.hour,
-                    type: currentSource.type,
-                    label: currentSource.label,
-                    priority: currentSource.priority,
-                },
-                to: {
-                    day: WEEK_DAYS[dayIndex],
-                    hour: currentTarget.hour,
-                },
-            },
-            'WeeklyPlanner'
-        );
-
+        logEvent(EVENT_TYPES.SLOT_MOVED, { from: { day: draggedSlot.dayIndex }, to: { day: dayIndex } }, 'WeeklyPlanner');
         setDraggedSlot(null);
     };
 
-    // Helper to choose Tailwind classes based on slot priority
     const getStudyClassesByPriority = (priority?: 'low' | 'medium' | 'high') => {
         switch (priority) {
-            case 'high':
-                return 'bg-red-50 text-red-700 border-red-200';
-            case 'medium':
-                return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-            case 'low':
-            default:
-                return 'bg-green-50 text-green-700 border-green-200';
+            case 'high': return 'bg-red-50 text-red-700 border-red-200';
+            case 'medium': return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+            case 'low': default: return 'bg-green-50 text-green-700 border-green-200';
         }
     };
 
     return (
-        <section className="w-full max-w-6xl mx-auto">
-            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
+        <section className="w-full max-w-6xl mx-auto my-10">
+            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
                 <div>
-                    <h2 className="text-2xl font-bold text-gray-900">
+                    <h2 className="text-3xl font-extrabold text-gray-800 tracking-tight">
                         Haftalık Plan &amp; Zamanlayıcı
                     </h2>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="text-sm text-gray-500 mt-2 max-w-2xl">
                         Rules: Max {MAX_STUDY_HOURS_PER_DAY} hours of study per day. First,
                         constraint (busy) slots are blocked, then study goals are distributed
                         across the week.
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">
                         The user can drag &amp; drop both study blocks and
                         constraints onto free slots to adjust the schedule manually. Colors
                         indicate priority (HIGH / MEDIUM / LOW).
                     </p>
                 </div>
-
-                <div className="text-xs text-gray-600 bg-white rounded-lg shadow-sm border px-4 py-2 flex flex-col gap-1">
-                    <span>
-                        Total study target:{' '}
-                        <span className="font-semibold">{totalStudyHours} hours</span>
-                    </span>
-                    <span>
-                        Total constrained time:{' '}
-                        <span className="font-semibold">{totalBusyHours} hours</span>
-                    </span>
+                <div className="text-xs font-mono bg-blue-50 text-blue-800 px-4 py-2 rounded-lg border border-blue-100">
+                    <div>Hedeflenen: {totalStudyHours} Saat</div>
+                    <div>Dolu/Kısıt: {totalBusyHours} Saat</div>
                 </div>
             </div>
 
-            {/* Legend */}
-            <div className="flex flex-wrap items-center gap-4 mb-4 text-xs text-gray-700">
-                <span className="inline-flex items-center gap-2 font-medium">
-                    <span className="w-3 h-3 rounded bg-red-50 border border-red-200" />
-                    Study Block – HIGH priority
-                </span>
-                <span className="inline-flex items-center gap-2 font-medium">
-                    <span className="w-3 h-3 rounded bg-yellow-50 border border-yellow-200" />
-                    Study Block – MEDIUM priority
-                </span>
-                <span className="inline-flex items-center gap-2 font-medium">
-                    <span className="w-3 h-3 rounded bg-green-50 border border-green-200" />
-                    Study Block – LOW priority
-                </span>
-                <span className="inline-flex items-center gap-2 font-medium">
-                    <span className="w-3 h-3 rounded bg-orange-50 border border-orange-200" />
-                    Constraint / Busy Time (draggable)
-                </span>
-                <span className="inline-flex items-center gap-2 font-medium">
-                    <span className="w-3 h-3 rounded bg-gray-50 border border-dashed border-gray-200" />
-                    Free / Unplanned
-                </span>
-            </div>
-
-            {/* Weekly grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-3">
+            {/* Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
                 {plan.map((day, dayIndex) => (
-                    <div
-                        key={day.dayName}
-                        className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 flex flex-col"
-                    >
-                        <h3 className="font-semibold text-sm text-gray-800 mb-2">
+                    <div key={day.dayName} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                        <div className="bg-gray-50 p-3 border-b border-gray-100 font-bold text-center text-gray-700 text-sm">
                             {day.dayName}
-                        </h3>
-                        <div className="space-y-1 max-h-[420px] overflow-y-auto pr-1">
+                        </div>
+                        <div className="p-2 space-y-1 overflow-y-auto max-h-[500px]">
                             {day.slots.map((slot, slotIndex) => {
-                                let cls =
-                                    'flex items-center justify-between text-[11px] px-2 py-1 rounded border cursor-default';
-
+                                let cls = 'flex items-center text-[11px] px-2 py-1.5 rounded border transition-all ';
+                                
                                 if (slot.type === 'free') {
-                                    cls +=
-                                        ' bg-gray-50 text-gray-400 border-dashed border-gray-200';
+                                    cls += 'bg-white border-dashed border-gray-200 text-gray-300';
                                 } else if (slot.type === 'busy') {
-                                    cls +=
-                                        ' bg-orange-50 text-orange-700 border-orange-200 cursor-move';
+                                    cls += 'bg-orange-100 border-orange-200 text-orange-800 font-semibold cursor-move hover:shadow-sm';
                                 } else if (slot.type === 'study') {
-                                    cls +=
-                                        ' ' +
-                                        getStudyClassesByPriority(slot.priority) +
-                                        ' cursor-move';
+                                    cls += getStudyClassesByPriority(slot.priority) + ' font-medium cursor-move hover:shadow-sm';
                                 }
-
-                                const draggable = slot.type !== 'free';
 
                                 return (
                                     <div
-                                        key={`${day.dayName}-${slot.hour}-${slotIndex}`}
+                                        key={`${day.dayName}-${slot.hour}`}
                                         className={cls}
-                                        draggable={draggable}
-                                        onDragStart={() =>
-                                            handleDragStart(dayIndex, slotIndex)
-                                        }
-                                        onDragOver={(e) =>
-                                            handleDragOver(e, dayIndex, slotIndex)
-                                        }
+                                        draggable={slot.type !== 'free'}
+                                        onDragStart={() => handleDragStart(dayIndex, slotIndex)}
+                                        onDragOver={(e) => handleDragOver(e, dayIndex, slotIndex)}
                                         onDrop={(e) => handleDrop(e, dayIndex, slotIndex)}
                                     >
-                                        <span className="font-mono mr-2">
-                                            {slot.hour.toString().padStart(2, '0')}:00
+                                        <span className="font-mono opacity-50 w-10 text-xs">
+                                            {slot.hour}:00
                                         </span>
                                         <span className="truncate flex-1">
-                                            {slot.type === 'free'
-                                                ? 'Boş'
-                                                : slot.label ??
-                                                (slot.type === 'busy' ? 'Kısıtlı' : '')}
+                                            {/* - Kısıtın gerçek adını gösterir */}
+                                            {slot.type === 'free' ? '-' : slot.label}
                                         </span>
                                     </div>
                                 );

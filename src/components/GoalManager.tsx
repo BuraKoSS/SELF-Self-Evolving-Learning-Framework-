@@ -2,220 +2,170 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
+import TaskActionMenu from './TaskActionMenu'; 
 
 export default function GoalManager() {
-  // --- STATE: HEDEFLER (GOALS) ---
   const [title, setTitle] = useState('');
   const [hours, setHours] = useState('');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
 
-  // --- STATE: KISITLAR (CONSTRAINTS) ---
-  const [consTitle, setConsTitle] = useState(''); // Örn: "Salı Spor"
-  const [consHours, setConsHours] = useState(''); // Örn: "2" saat
+  const [consTitle, setConsTitle] = useState('');
+  const [consHours, setConsHours] = useState('');
+  // consDay state'ini kaldırdık çünkü formdan sildik.
 
-  // --- READ: VERİTABANINDAN CANLI ÇEKME ---
-  // useLiveQuery sayesinde veritabanı değiştiği an bu listeler otomatik güncellenir.
-  const goals = useLiveQuery(() => db.goals.toArray());
-  // Dikkat: db.constraints'in çalışması için db.ts dosyanızı güncellemiş olmanız gerekir.
+  // SORGULAR
+  const goalsWithProgress = useLiveQuery(async () => {
+    const goals = await db.goals.toArray();
+    const sessions = await db.sessions.toArray();
+
+    return goals.map(g => {
+        const totalMinutes = sessions
+            .filter((s: any) => s.goalId === g.id && s.status === 'completed')
+            .reduce((acc: number, s: any) => acc + s.duration, 0);
+        
+        return {
+            ...g,
+            completedHours: (totalMinutes / 60).toFixed(1)
+        };
+    });
+  });
+
   const constraints = useLiveQuery(() => db.constraints?.toArray() ?? []); 
 
-  // --- CREATE: HEDEF EKLEME ---
+  // --- ACTIONS ---
   const addGoal = async () => {
     if (!title || !hours) return alert('Lütfen ders adı ve saat giriniz.');
-    
-    try {
-      await db.goals.add({
-        title,
-        targetHours: Number(hours),
-        priority,
-        deadline: new Date() // Varsayılan olarak bugünün tarihi
-      });
-      setTitle(''); 
-      setHours('');
-    } catch (error) {
-      console.error("Hedef eklenirken hata:", error);
-    }
+    await db.goals.add({
+      title,
+      targetHours: Number(hours),
+      priority,
+      deadline: new Date(),
+      status: 'active'
+    });
+    setTitle(''); setHours('');
   };
 
-  // --- CREATE: KISIT EKLEME ---
   const addConstraint = async () => {
     if (!consTitle || !consHours) return alert('Lütfen kısıt adı ve süre giriniz.');
-
-    try {
-      // db.constraints tablosuna yazıyoruz
-      if (db.constraints) {
+    if (db.constraints) {
         await db.constraints.add({
           title: consTitle,
-          type: 'busy', // Varsayılan tip: meşgul
-          duration: Number(consHours)
+          type: 'busy',
+          duration: Number(consHours),
+          day: 'Genel' // Varsayılan değer, çünkü seçim kaldırıldı
         });
-        setConsTitle(''); 
-        setConsHours('');
-      } else {
-        alert("Veritabanı şeması güncel değil. Lütfen db.ts dosyasını kontrol edin.");
-      }
-    } catch (error) {
-      console.error("Kısıt eklenirken hata:", error);
-    }
-  };
-
-  // --- DELETE: SİLME İŞLEMLERİ ---
-  const deleteGoal = async (id: number) => {
-    await db.goals.delete(id);
-  };
-
-  const deleteConstraint = async (id: number) => {
-    if (db.constraints) {
-      await db.constraints.delete(id);
+        setConsTitle(''); setConsHours('');
     }
   };
 
   return (
-    <div className="w-full max-w-6xl mx-auto p-4">
+    <div className="w-full max-w-6xl mx-auto p-4 space-y-10">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         
-        {/* --- SOL PANEL: DERS HEDEFLERİ --- */}
+        {/* --- DERS HEDEFLERİ (SOL) --- */}
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold text-blue-700">Ders Hedefleri</h2>
             <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">
-              Toplam: {goals?.length || 0}
+              {goalsWithProgress?.length || 0} Ders
             </span>
           </div>
           
-          {/* Ekleme Formu */}
           <div className="bg-white p-5 shadow-lg rounded-xl border border-blue-100">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Ders / Konu Adı</label>
-            <input 
-              className="border border-gray-300 p-2 rounded w-full mb-3 focus:ring-2 focus:ring-blue-500 outline-none" 
-              placeholder="Örn: CENG472 Secure Coding" 
-              value={title} 
-              onChange={e => setTitle(e.target.value)} 
-            />
-            
+            <input className="border border-gray-300 p-2 rounded w-full mb-3" placeholder="Örn: CENG472 Secure Coding" value={title} onChange={e => setTitle(e.target.value)} />
             <div className="flex gap-3">
-              <div className="w-1/3">
-                <input 
-                  className="border border-gray-300 p-2 rounded w-full" 
-                  type="number" 
-                  placeholder="Saat" 
-                  value={hours} 
-                  onChange={e => setHours(e.target.value)} 
-                />
-              </div>
-              <div className="w-1/3">
-                <select 
-                  className="border border-gray-300 p-2 rounded w-full bg-white" 
-                  value={priority} 
-                  onChange={e => setPriority(e.target.value as any)}
-                >
-                  <option value="medium">Orta</option>
-                  <option value="high">Yüksek</option>
-                  <option value="low">Düşük</option>
-                </select>
-              </div>
-              <button 
-                onClick={addGoal} 
-                className="w-1/3 bg-blue-600 text-white font-medium rounded hover:bg-blue-700 transition"
-              >
-                + Ekle
-              </button>
+              <input className="border border-gray-300 p-2 rounded w-1/3" type="number" placeholder="Saat" value={hours} onChange={e => setHours(e.target.value)} />
+              <select className="border border-gray-300 p-2 rounded w-1/3 bg-white" value={priority} onChange={e => setPriority(e.target.value as any)}>
+                <option value="medium">Orta</option>
+                <option value="high">Yüksek</option>
+                <option value="low">Düşük</option>
+              </select>
+              <button onClick={addGoal} className="w-1/3 bg-blue-600 text-white rounded hover:bg-blue-700">+ Ekle</button>
             </div>
           </div>
 
-          {/* Liste */}
-          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
-            {goals?.map(g => (
-              <div key={g.id} className="group bg-white p-4 shadow-sm rounded-lg border-l-4 border-blue-500 flex justify-between items-center hover:shadow-md transition">
-                <div>
-                  <div className="font-bold text-gray-800 text-lg">{g.title}</div>
-                  <div className="text-xs text-gray-500 mt-1 flex gap-2">
-                    <span className="bg-gray-100 px-2 py-0.5 rounded">Hedef: {g.targetHours}s</span>
-                    <span className={`px-2 py-0.5 rounded uppercase ${g.priority === 'high' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                      {g.priority}
-                    </span>
-                  </div>
+          <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 pb-20">
+            {goalsWithProgress?.map(g => (
+              <div 
+                key={g.id} 
+                className={`bg-white p-4 shadow-sm rounded-lg border-l-4 relative group z-0 hover:z-10 transition-all
+                    ${g.status === 'postponed' ? 'border-gray-300 bg-gray-50' : 'border-blue-500'} 
+                `}
+              >
+                <div className="flex justify-between items-start mb-2">
+                    <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <span className={`font-bold text-lg ${g.status === 'postponed' ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
+                                    {g.title}
+                                </span>
+                                {g.status === 'postponed' && (
+                                    <span className="text-[10px] bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded border border-yellow-200">
+                                        ASKIDA
+                                    </span>
+                                )}
+                            </div>
+                            
+                            {/* MENU: status prop'u eklendi */}
+                            <TaskActionMenu 
+                                goalId={g.id!} 
+                                goalTitle={g.title} 
+                                currentStatus={g.status} 
+                            />
+                        </div>
+                        <div className="text-sm text-gray-600 mt-1">
+                            <span className="font-semibold text-blue-700">{g.completedHours}</span> / {g.targetHours} Saat
+                        </div>
+                    </div>
                 </div>
-                <button 
-                  onClick={() => deleteGoal(g.id!)} 
-                  className="text-gray-400 hover:text-red-500 transition px-2 py-1"
-                  title="Sil"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                  </svg>
-                </button>
+                
+                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div 
+                        className={`h-2 rounded-full transition-all duration-500 ${g.status === 'postponed' ? 'bg-gray-400' : 'bg-blue-600'}`}
+                        style={{ width: `${Math.min(100, (Number(g.completedHours) / g.targetHours) * 100)}%` }}
+                    />
+                </div>
               </div>
             ))}
-            {goals?.length === 0 && <p className="text-gray-400 text-center italic mt-4">Henüz bir ders eklenmedi.</p>}
           </div>
         </div>
 
-        {/* --- SAĞ PANEL: ZAMAN KISITLARI --- */}
+        {/* --- ZAMAN KISITLARI (SAĞ) --- */}
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-orange-600">Zaman Kısıtları</h2>
-            <span className="bg-orange-100 text-orange-800 text-xs font-semibold px-2.5 py-0.5 rounded">
-              Toplam: {constraints?.length || 0}
-            </span>
-          </div>
-
-          {/* Ekleme Formu */}
+          <h2 className="text-2xl font-bold text-orange-600">Zaman Kısıtları</h2>
+          
+          {/* Form ESKİ HALİNE döndü (Gün seçimi kalktı) */}
           <div className="bg-white p-5 shadow-lg rounded-xl border border-orange-100">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Kısıt Tanımı</label>
-            <input 
-              className="border border-gray-300 p-2 rounded w-full mb-3 focus:ring-2 focus:ring-orange-500 outline-none" 
-              placeholder="Örn: Salı Basketbol Antrenmanı" 
-              value={consTitle} 
-              onChange={e => setConsTitle(e.target.value)} 
-            />
-            
+            <input className="border border-gray-300 p-2 rounded w-full mb-3" placeholder="Örn: Basketbol Antrenmanı" value={consTitle} onChange={e => setConsTitle(e.target.value)} />
             <div className="flex gap-3">
-              <div className="w-2/3">
-                <input 
-                  className="border border-gray-300 p-2 rounded w-full" 
-                  type="number" 
-                  placeholder="Süre (Saat)" 
-                  value={consHours} 
-                  onChange={e => setConsHours(e.target.value)} 
-                />
-              </div>
-              <button 
-                onClick={addConstraint} 
-                className="w-1/3 bg-orange-600 text-white font-medium rounded hover:bg-orange-700 transition"
-              >
-                Ekle
-              </button>
+              <input className="border border-gray-300 p-2 rounded w-2/3" type="number" placeholder="Süre (Saat)" value={consHours} onChange={e => setConsHours(e.target.value)} />
+              <button onClick={addConstraint} className="w-1/3 bg-orange-600 text-white rounded hover:bg-orange-700">Ekle</button>
             </div>
           </div>
-
-          {/* Liste */}
-          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+          
+          <div className="space-y-3">
             {constraints?.map(c => (
-              <div key={c.id} className="group bg-white p-4 shadow-sm rounded-lg border-l-4 border-orange-500 flex justify-between items-center hover:shadow-md transition">
+              <div key={c.id} className="bg-white p-4 shadow-sm rounded-lg border-l-4 border-orange-500 flex justify-between items-center group">
                 <div>
                   <div className="font-bold text-gray-800 text-lg">{c.title}</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    <span className="bg-orange-50 text-orange-700 px-2 py-0.5 rounded border border-orange-100">
-                      {c.duration} Saat Blokeli
-                    </span>
+                  <div className="text-xs text-orange-700 bg-orange-50 px-2 py-0.5 rounded border border-orange-100 mt-1 inline-block">
+                    {c.duration} Saat Blokeli
                   </div>
                 </div>
                 <button 
-                  onClick={() => deleteConstraint(c.id!)} 
-                  className="text-gray-400 hover:text-red-500 transition px-2 py-1"
+                  onClick={() => db.constraints.delete(c.id!)} 
+                  className="text-gray-300 hover:text-red-500 transition p-2"
                   title="Sil"
                 >
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
               </div>
             ))}
-            {constraints?.length === 0 && <p className="text-gray-400 text-center italic mt-4">Henüz bir kısıt eklenmedi.</p>}
+            {constraints?.length === 0 && <p className="text-gray-400 italic">Henüz kısıt yok.</p>}
           </div>
         </div>
-
       </div>
     </div>
   );

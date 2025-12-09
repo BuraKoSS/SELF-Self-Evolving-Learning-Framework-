@@ -6,37 +6,71 @@ export interface Goal {
   targetHours: number;
   priority: 'low' | 'medium' | 'high';
   deadline?: Date;
+  status?: 'active' | 'postponed' | 'completed'; // [YENİ] Durum alanı
 }
 
-// YENİ EKLENEN KISIM: Kısıtlar (Örn: Bugün meşgulüm)
 export interface Constraint {
   id?: number;
-  title: string;       // Örn: "Salı Basketbol Antrenmanı"
-  type: 'busy' | 'day_off';
-  duration: number;    // Örn: 2 saat
+  title: string;
+  type: 'busy' | 'day_off'; 
+  duration: number;
+  day: string; // Kısıtın hangi günde olduğu
 }
 
-// unified event log recor d
-export interface PlannerLog{
+export interface Session {
   id?: number;
-  type: string;       // GOAL_CREATED, SLOT_MOVED etc
-  ts: number;  // Date.now()
-  source?: string;    // GoalManager, WeeklyPlanner
-  payload: any;       // flexible for minimuym viable product
+  goalId: number;
+  startTime: Date;
+  duration: number;
+  status: 'completed' | 'interrupted';
+}
+
+export interface PlannerLog {
+    id?: number;
+    type: string;
+    ts: number;
+    source?: string;
+    payload?: any;
 }
 
 export class SelfDatabase extends Dexie {
   goals!: Table<Goal>;
-  constraints!: Table<Constraint>; // Yeni tablo
+  constraints!: Table<Constraint>;
+  sessions!: Table<Session>;
   logs!: Table<PlannerLog>;
 
   constructor() {
     super('SelfDatabase');
-    // Versiyonu 2'ye çektik ki tarayıcı veritabanını güncellesin
-    this.version(3).stores({
+    
+    // Eski versiyonlar...
+    this.version(1).stores({
       goals: '++id, title, deadline, priority',
-      constraints: '++id, type', // Yeni indeks
-      logs: '++id, type, ts, source'
+      sessions: '++id, goalId, startTime, status' 
+    });
+    this.version(2).stores({
+      goals: '++id, title, deadline, priority',
+      constraints: '++id, type',
+      sessions: '++id, goalId, startTime, status' 
+    });
+    this.version(3).stores({
+        goals: '++id, title, deadline, priority',
+        constraints: '++id, type',
+        sessions: '++id, goalId, startTime, status',
+        logs: '++id, type, ts'
+    });
+    this.version(4).stores({
+        goals: '++id, title, deadline, priority',
+        constraints: '++id, type, day',
+        sessions: '++id, goalId, startTime, status',
+        logs: '++id, type, ts'
+    });
+    
+    // [YENİ] Versiyon 5: Goals tablosuna 'status' eklendi (Dexie otomatik halleder)
+    this.version(5).stores({
+        goals: '++id, title, deadline, priority, status',
+        constraints: '++id, type, day',
+        sessions: '++id, goalId, startTime, status',
+        logs: '++id, type, ts'
     });
   }
 }
