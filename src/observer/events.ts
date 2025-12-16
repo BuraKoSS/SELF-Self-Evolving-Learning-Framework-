@@ -8,6 +8,8 @@ export const EVENT_TYPES = {
     FOCUS: "FOCUS",
     POSTPONE: "POSTPONE",
     CANCEL: "CANCEL",
+    TUNER_POLICY_UPDATED: "TUNER_POLICY_UPDATED",
+    TUNER_POLICY_APPLIED: "TUNER_POLICY_APPLIED",
 } as const;
 
 export type PlannerEventType = typeof EVENT_TYPES[keyof typeof EVENT_TYPES];
