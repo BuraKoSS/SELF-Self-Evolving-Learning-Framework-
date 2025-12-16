@@ -4,17 +4,27 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db/db";
 import { logEvent } from "../observer/logging";
 import { EVENT_TYPES } from "../observer/events";
+import { tunePomodoroSettings } from "../tuner/TunerAgent";
+import { loadPrefs, savePrefs } from "../tuner/UserPrefs";
 
 export default function PomodoroTimer() {
-    const WORK_TIME = 30 * 60; // [GÜNCELLEME] 30 Dakika
+
+    const [workDuration, setWorkDuration] = useState(30 * 60);
     const BREAK_TIME = 5 * 60;
 
-    const [timeLeft, setTimeLeft] = useState(WORK_TIME);
+    const [timeLeft, setTimeLeft] = useState(workDuration);
     const [isRunning, setIsRunning] = useState(false);
     const [mode, setMode] = useState("work"); 
     
     const [selectedGoalId, setSelectedGoalId] = useState("");
     const goals = useLiveQuery(() => db.goals.toArray());
+
+    useEffect(() => {
+        const prefs = tunePomodoroSettings();
+        const tunedSeconds = prefs.pomodoroLength * 60;
+        setWorkDuration(tunedSeconds);
+        setTimeLeft(tunedSeconds);
+    }, []);
 
     useEffect(() => {
         let interval = null;
@@ -30,39 +40,46 @@ export default function PomodoroTimer() {
         if (timeLeft === 0 && isRunning) {
             handleComplete();
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [timeLeft, isRunning]); 
 
     const handleComplete = async () => {
         setIsRunning(false);
 
         if (mode === "work") {
+
+            const prefs = loadPrefs();
+            prefs.completedSessions += 1;
+            savePrefs(prefs);
+
             if (selectedGoalId) {
                 try {
                     const goalIdNum = Number(selectedGoalId);
+
                     await logEvent(EVENT_TYPES.FOCUS, {
                         goalId: goalIdNum,
-                        durationMinutes: 30, // 30 dk loglanıyor
+                        durationMinutes: workDuration / 60,
                         completedAt: new Date()
                     }, 'PomodoroTimer');
 
                     await db.sessions.add({
                         goalId: goalIdNum,
                         startTime: new Date(),
-                        duration: 30, 
+                        duration: workDuration / 60,
                         status: 'completed'
                     });
-                    
-                    alert("Oturum tamamlandı! (30 dk)");
+
+                    alert(`Oturum tamamlandı! (${workDuration / 60} dk)`);
                 } catch (error) {
                     console.error("Kayıt hatası:", error);
                 }
             }
+
             setMode("break");
             setTimeLeft(BREAK_TIME);
+
         } else {
             setMode("work");
-            setTimeLeft(WORK_TIME);
+            setTimeLeft(workDuration);
             alert("Mola bitti!");
         }
     };
@@ -78,16 +95,20 @@ export default function PomodoroTimer() {
     const resetTimer = () => {
         setIsRunning(false);
         setMode("work");
-        setTimeLeft(WORK_TIME);
+        setTimeLeft(workDuration);
     };
 
-    // [YENİ] Test Butonu Fonksiyonu
+    // [YENİ] Yarıda kesme → başarısız oturum
     const forceFinish = () => {
         if (mode === 'work' && !selectedGoalId) {
             alert("Ders seçin, sonra bitirin.");
             return;
         }
-        // Sayacı 1 saniyeye indir, useEffect yakalasın
+
+        const prefs = loadPrefs();
+        prefs.failedSessions += 1;
+        savePrefs(prefs);
+
         setIsRunning(true);
         setTimeLeft(0); 
     };
@@ -99,11 +120,18 @@ export default function PomodoroTimer() {
     };
 
     return (
-        <div className="bg-white p-6 rounded-xl shadow-md border text-center max-w-md mx-auto mb-8 transition-colors duration-300" 
-             style={{ borderColor: isRunning ? (mode === 'work' ? '#f97316' : '#22c55e') : '#e5e7eb' }}>
-            
+        <div
+            className="bg-white p-6 rounded-xl shadow-md border text-center max-w-md mx-auto mb-8 transition-colors duration-300"
+            style={{
+                borderColor: isRunning
+                    ? (mode === 'work' ? '#f97316' : '#22c55e')
+                    : '#e5e7eb'
+            }}
+        >
             <h2 className="text-2xl font-bold mb-4 text-gray-800">
-                {mode === "work" ? "🔥 Çalışma Modu (30dk)" : "☕ Mola Modu"}
+                {mode === "work"
+                    ? `🔥 Çalışma Modu (${workDuration / 60}dk)`
+                    : "☕ Mola Modu"}
             </h2>
 
             {mode === "work" && (
@@ -116,7 +144,9 @@ export default function PomodoroTimer() {
                     >
                         <option value="">-- Ders Seçin --</option>
                         {goals?.map((g) => (
-                            <option key={g.id} value={g.id}>{g.title}</option>
+                            <option key={g.id} value={g.id}>
+                                {g.title}
+                            </option>
                         ))}
                     </select>
                 </div>
@@ -143,7 +173,6 @@ export default function PomodoroTimer() {
                     Sıfırla
                 </button>
 
-                {/* [YENİ] Test Butonu */}
                 <button 
                     onClick={forceFinish}
                     className="px-4 py-2 rounded-full bg-purple-100 text-purple-700 font-bold text-xs hover:bg-purple-200 border border-purple-300"
