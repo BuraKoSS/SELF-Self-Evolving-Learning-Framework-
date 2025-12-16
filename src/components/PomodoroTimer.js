@@ -4,8 +4,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db/db";
 import { logEvent } from "../observer/logging";
 import { EVENT_TYPES } from "../observer/events";
-import { tunePomodoroSettings } from "../tuner/TunerAgent";
-import { loadPrefs, savePrefs } from "../tuner/UserPrefs";
+import { tunePomodoroSettings } from "./TunerAgent";
+import { loadPrefs, savePrefs } from "./UserPrefs";
 
 export default function PomodoroTimer() {
 
