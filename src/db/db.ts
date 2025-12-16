@@ -33,11 +33,18 @@ export interface PlannerLog {
     payload?: any;
 }
 
+export interface SettingRecord<TValue = any> {
+  key: string;
+  value: TValue;
+  updatedAt: number;
+}
+
 export class SelfDatabase extends Dexie {
   goals!: Table<Goal>;
   constraints!: Table<Constraint>;
   sessions!: Table<Session>;
   logs!: Table<PlannerLog>;
+  settings!: Table<SettingRecord>;
 
   constructor() {
     super('SelfDatabase');
@@ -71,6 +78,14 @@ export class SelfDatabase extends Dexie {
         constraints: '++id, type, day',
         sessions: '++id, goalId, startTime, status',
         logs: '++id, type, ts'
+    });
+
+    this.version(6).stores({
+        goals: '++id, title, deadline, priority, status',
+        constraints: '++id, type, day',
+        sessions: '++id, goalId, startTime, status',
+        logs: '++id, type, ts',
+        settings: '&key, updatedAt'
     });
   }
 }
