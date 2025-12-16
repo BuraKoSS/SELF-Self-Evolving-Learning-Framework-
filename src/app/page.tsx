@@ -3,6 +3,7 @@ import GoalManager from '../components/GoalManager';
 import WeeklyPlanner from '../components/WeeklyPlanner';
 import PomodoroPage from './pomodoro/page';
 import LogPanel from '../components/LogPanel';
+import AnalyticsDashboard from "../components/AnalyticsDashboard";
 
 export default function Home() {
     return (
@@ -30,6 +31,11 @@ export default function Home() {
             {/* Haftalık Plan & Scheduler */}
             <div className="mt-16 border-t pt-10">
                 <WeeklyPlanner />
+            </div>
+
+            {/* Analytics Dashboard */}
+            <div className="mt-16 border-t pt-10">
+                <AnalyticsDashboard />
             </div>
 
             {/* Observer Logs (temporary dev panel) */}
