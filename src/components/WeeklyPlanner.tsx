@@ -5,6 +5,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, Goal, Constraint } from '../db/db';
 import { logEvent } from '../observer/logging';
 import { EVENT_TYPES } from '../observer/events';
+import { SchedulerRule, SlotRationale, createRationale } from '../scheduler/rules';
 
 const WEEK_DAYS = [
     'Pazartesi',
@@ -27,6 +28,7 @@ interface Slot {
     type: SlotType;
     label?: string;
     priority?: 'low' | 'medium' | 'high';
+    rationale?: SlotRationale;
 }
 
 interface DayPlan {
@@ -56,6 +58,7 @@ function buildWeeklyPlan(
             (_, i): Slot => ({
                 hour: START_HOUR + i,
                 type: 'free',
+                rationale: createRationale(SchedulerRule.SLOT_FREE_AVAILABLE),
             })
         ),
     }));
@@ -81,7 +84,14 @@ function buildWeeklyPlan(
                     slot.type = 'busy';
                     slot.label = c.title; // - Kısıtın gerçek adını bas
                     slot.priority = undefined;
+                    slot.rationale = createRationale(SchedulerRule.CONSTRAINT_SPECIFIC_DAY, {
+                        constraintTitle: c.title,
+                        dayName: WEEK_DAYS[targetDayIndex],
+                        hour: h,
+                    });
                     remaining--;
+                } else {
+                    slot.rationale = createRationale(SchedulerRule.SLOT_ALREADY_OCCUPIED);
                 }
             } else {
                 // --- SENARYO B: Gün Seçilmemiş (Genel Kısıt) ---
@@ -92,6 +102,11 @@ function buildWeeklyPlan(
                         slot.type = 'busy';
                         slot.label = c.title; // Kısıtın gerçek adını bas
                         slot.priority = undefined;
+                        slot.rationale = createRationale(SchedulerRule.CONSTRAINT_GENERAL_DISTRIBUTION, {
+                            constraintTitle: c.title,
+                            dayName: WEEK_DAYS[d],
+                            hour: h,
+                        });
                         remaining--;
                     }
                 }
@@ -119,8 +134,19 @@ function buildWeeklyPlan(
             const slot = days[d].slots[s];
 
             // Skip if busy or daily limit reached
-            if (slot.type !== 'free') continue;
-            if (usedToday >= MAX_STUDY_HOURS_PER_DAY) continue;
+            if (slot.type !== 'free') {
+                if (!slot.rationale) {
+                    slot.rationale = createRationale(SchedulerRule.CONSTRAINT_BLOCKED_SLOT);
+                }
+                continue;
+            }
+            if (usedToday >= MAX_STUDY_HOURS_PER_DAY) {
+                slot.rationale = createRationale(SchedulerRule.DAILY_STUDY_LIMIT_REACHED, {
+                    dailyLimit: MAX_STUDY_HOURS_PER_DAY,
+                    usedToday,
+                });
+                continue;
+            }
 
             // Stop if no remaining goals
             if (!goalStates.some((g) => g.remaining > 0 && g.status !== 'postponed')) break;
@@ -136,12 +162,37 @@ function buildWeeklyPlan(
             }
 
             // Double check if we found a valid goal
-            if (goalStates[currentGoalIndex].remaining <= 0 || goalStates[currentGoalIndex].status === 'postponed') break;
+            if (goalStates[currentGoalIndex].remaining <= 0 || goalStates[currentGoalIndex].status === 'postponed') {
+                if (goalStates[currentGoalIndex].status === 'postponed') {
+                    slot.rationale = createRationale(SchedulerRule.GOAL_POSTPONED_SKIPPED, {
+                        goalTitle: goalStates[currentGoalIndex].title,
+                    });
+                }
+                break;
+            }
 
             // Assign slot
             slot.type = 'study';
             slot.label = goalStates[currentGoalIndex].title;
             slot.priority = goalStates[currentGoalIndex].priority;
+            
+            // Rationale: Priority-based or round-robin
+            if (goalStates[currentGoalIndex].priority === 'high' && s < days[d].slots.length / 2) {
+                slot.rationale = createRationale(SchedulerRule.HIGH_PRIORITY_GOAL_ALLOCATED_EARLIER, {
+                    goalTitle: goalStates[currentGoalIndex].title,
+                    priority: goalStates[currentGoalIndex].priority,
+                    dayName: WEEK_DAYS[d],
+                    hour: slot.hour,
+                });
+            } else {
+                slot.rationale = createRationale(SchedulerRule.GOAL_ROUND_ROBIN_DISTRIBUTION, {
+                    goalTitle: goalStates[currentGoalIndex].title,
+                    priority: goalStates[currentGoalIndex].priority,
+                    dayName: WEEK_DAYS[d],
+                    hour: slot.hour,
+                });
+            }
+            
             goalStates[currentGoalIndex].remaining -= 1;
             usedToday++;
 
@@ -169,11 +220,20 @@ export default function WeeklyPlanner() {
             const nextPlan = buildWeeklyPlan(goals, constraints);
             setPlan(nextPlan);
 
+            // Collect all rationales for logging
+            const allRationales = nextPlan.flatMap(day => 
+                day.slots
+                    .filter(slot => slot.rationale)
+                    .map(slot => slot.rationale!)
+            );
+
             logEvent(
                 EVENT_TYPES.SCHEDULER_RUN,
                 {
                     goalsCount: goals.length,
                     constraintsCount: constraints.length,
+                    rationalesCount: allRationales.length,
+                    rationales: allRationales,
                 },
                 'WeeklyPlanner'
             );
@@ -218,8 +278,8 @@ export default function WeeklyPlanner() {
             const target = copy[dayIndex].slots[slotIndex];
 
             // Swap logic
-            copy[dayIndex].slots[slotIndex] = { ...target, type: source.type, label: source.label, priority: source.priority };
-            copy[draggedSlot.dayIndex].slots[draggedSlot.slotIndex] = { ...source, type: 'free', label: undefined, priority: undefined };
+            copy[dayIndex].slots[slotIndex] = { ...target, type: source.type, label: source.label, priority: source.priority, rationale: source.rationale };
+            copy[draggedSlot.dayIndex].slots[draggedSlot.slotIndex] = { ...source, type: 'free', label: undefined, priority: undefined, rationale: undefined };
 
             return copy;
         });
@@ -280,11 +340,12 @@ export default function WeeklyPlanner() {
                                 return (
                                     <div
                                         key={`${day.dayName}-${slot.hour}`}
-                                        className={cls}
+                                        className={`${cls} relative group`}
                                         draggable={slot.type !== 'free'}
                                         onDragStart={() => handleDragStart(dayIndex, slotIndex)}
                                         onDragOver={(e) => handleDragOver(e, dayIndex, slotIndex)}
                                         onDrop={(e) => handleDrop(e, dayIndex, slotIndex)}
+                                        title={slot.rationale?.message || undefined}
                                     >
                                         <span className="font-mono opacity-50 w-10 text-xs">
                                             {slot.hour}:00
@@ -293,6 +354,19 @@ export default function WeeklyPlanner() {
                                             {/* - Kısıtın gerçek adını gösterir */}
                                             {slot.type === 'free' ? '-' : slot.label}
                                         </span>
+                                        {slot.rationale && (
+                                            <div className="absolute left-full ml-2 top-0 z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                                                <div className="font-semibold mb-1">Neden?</div>
+                                                <div>{slot.rationale.message}</div>
+                                                {slot.rationale.details && (
+                                                    <div className="mt-1 text-gray-300 text-[10px]">
+                                                        {slot.rationale.details.goalTitle && `Hedef: ${slot.rationale.details.goalTitle}`}
+                                                        {slot.rationale.details.constraintTitle && `Kısıt: ${slot.rationale.details.constraintTitle}`}
+                                                        {slot.rationale.details.priority && `Öncelik: ${slot.rationale.details.priority}`}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 );
                             })}
