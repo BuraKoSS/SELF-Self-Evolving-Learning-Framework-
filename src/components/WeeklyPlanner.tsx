@@ -17,6 +17,9 @@ import {
 } from "../tuner/weeklyPlannerPolicy";
 import { tuneWeeklyPlannerPolicyFromLogs } from "../tuner/TunerAgent";
 import { SchedulerRule, SlotRationale, createRationale } from "../scheduler/rules";
+import { Slot, SlotType, DayPlan } from "../types/plan";
+import { analyzePlan } from "../guardian/GuardianAgent";
+import { GuardianIssue } from "../guardian/types";
 
 const WEEK_DAYS = [
   "Pazartesi",
@@ -31,21 +34,6 @@ const WEEK_DAYS = [
 const START_HOUR = 9;
 const END_HOUR = 22; // end boundary (exclusive)
 const SLOT_MINUTES = 30;
-
-type SlotType = "free" | "study" | "busy";
-
-interface Slot {
-  startMinutes: number; // minutes since 00:00
-  type: SlotType;
-  label?: string;
-  priority?: "low" | "medium" | "high";
-  rationale?: SlotRationale;
-}
-
-interface DayPlan {
-  dayName: string;
-  slots: Slot[];
-}
 
 // ---------------- Baseline Scheduler (rules + heuristics) ----------------
 
@@ -148,18 +136,18 @@ function buildWeeklyPlan(
 
   const effectivePolicy: WeeklyPlannerPolicy = examSoon
     ? {
-        ...policy,
-        morningWeight: clamp(
-          policy.morningWeight + policy.examMorningBoost,
-          0.5,
-          3
-        ),
-        eveningWeight: clamp(
-          policy.eveningWeight - policy.examEveningPenalty,
-          0.3,
-          3
-        ),
-      }
+      ...policy,
+      morningWeight: clamp(
+        policy.morningWeight + policy.examMorningBoost,
+        0.5,
+        3
+      ),
+      eveningWeight: clamp(
+        policy.eveningWeight - policy.examEveningPenalty,
+        0.3,
+        3
+      ),
+    }
     : policy;
 
   // Add exam rationale to all days if exam window is active
@@ -321,16 +309,16 @@ function buildWeeklyPlan(
       // Place block with rationale
       const blockRationale = bestBucket === "morning"
         ? createRationale(SchedulerRule.GOAL_BLOCK_PLACED_MORNING, {
-            goalTitle: g.title,
-            priority: g.priority,
-            dayName: WEEK_DAYS[d],
-            startMinutes: daySlots[bestStart].startMinutes,
-            blockLength: bestLen * SLOT_MINUTES,
-            bucket: "morning",
-            score: bestScore,
-          })
+          goalTitle: g.title,
+          priority: g.priority,
+          dayName: WEEK_DAYS[d],
+          startMinutes: daySlots[bestStart].startMinutes,
+          blockLength: bestLen * SLOT_MINUTES,
+          bucket: "morning",
+          score: bestScore,
+        })
         : bestBucket === "evening"
-        ? createRationale(SchedulerRule.GOAL_BLOCK_PLACED_EVENING, {
+          ? createRationale(SchedulerRule.GOAL_BLOCK_PLACED_EVENING, {
             goalTitle: g.title,
             priority: g.priority,
             dayName: WEEK_DAYS[d],
@@ -339,7 +327,7 @@ function buildWeeklyPlan(
             bucket: "evening",
             score: bestScore,
           })
-        : createRationale(SchedulerRule.GOAL_BLOCK_PLACED_MIDDAY, {
+          : createRationale(SchedulerRule.GOAL_BLOCK_PLACED_MIDDAY, {
             goalTitle: g.title,
             priority: g.priority,
             dayName: WEEK_DAYS[d],
@@ -379,6 +367,13 @@ export default function WeeklyPlanner() {
     slotIndex: number;
   } | null>(null);
 
+  const [guardianIssues, setGuardianIssues] = useState<GuardianIssue[]>([]);
+
+  useEffect(() => {
+    const issues = analyzePlan(plan, goals ?? [], constraints ?? [], policy.maxStudyMinutesPerDay);
+    setGuardianIssues(issues);
+  }, [plan, goals, constraints, policy.maxStudyMinutesPerDay]);
+
   useEffect(() => {
     getWeeklyPlannerPolicy()
       .then(setPolicy)
@@ -391,7 +386,7 @@ export default function WeeklyPlanner() {
       setPlan(nextPlan);
 
       // Collect all rationales for logging
-      const allRationales = nextPlan.flatMap(day => 
+      const allRationales = nextPlan.flatMap(day =>
         day.slots
           .filter(slot => slot.rationale)
           .map(slot => slot.rationale!)
@@ -445,10 +440,9 @@ export default function WeeklyPlanner() {
       const { policy: next, report } = await tuneWeeklyPlannerPolicyFromLogs(7);
       setPolicy(next);
       setTuneStatus(
-        `Auto-tune OK. Değişiklik: ${
-          Object.keys(report.changes).length
-            ? JSON.stringify(report.changes)
-            : "yok"
+        `Auto-tune OK. Değişiklik: ${Object.keys(report.changes).length
+          ? JSON.stringify(report.changes)
+          : "yok"
         }`
       );
     } catch (e) {
@@ -676,6 +670,30 @@ export default function WeeklyPlanner() {
           </label>
         </div>
       </div>
+
+      {/* Guardian Agent Warnings */}
+      {guardianIssues.length > 0 && (
+        <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-2 text-red-800 font-bold">
+            <span className="text-xl">🛡️</span> Guardian Agent: {guardianIssues.length} Sorun Tespit Edildi
+          </div>
+          <div className="space-y-2">
+            {guardianIssues.map((issue, idx) => (
+              <div key={idx} className="flex items-start gap-3 bg-white p-3 rounded-lg border border-red-100 text-sm shadow-sm">
+                <div className={`mt-0.5 w-2 h-2 rounded-full ${issue.severity === 'critical' ? 'bg-red-600' : 'bg-orange-400'}`} />
+                <div className="flex-1">
+                  <div className="font-semibold text-gray-800">{issue.message}</div>
+                  {issue.suggestedFix && (
+                    <div className="text-gray-600 text-xs mt-1">
+                      💡 Öneri: <span className="italic">{issue.suggestedFix.description}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Grid */}
       <div className="grid grid-cols-1 md:grid-cols-7 gap-3">

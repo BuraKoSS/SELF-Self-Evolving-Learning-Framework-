@@ -10,6 +10,7 @@ export const EVENT_TYPES = {
     CANCEL: "CANCEL",
     TUNER_POLICY_UPDATED: "TUNER_POLICY_UPDATED",
     TUNER_POLICY_APPLIED: "TUNER_POLICY_APPLIED",
+    GUARDIAN_WARNING: "GUARDIAN_WARNING",
 } as const;
 
 export type PlannerEventType = typeof EVENT_TYPES[keyof typeof EVENT_TYPES];
