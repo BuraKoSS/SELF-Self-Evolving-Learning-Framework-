@@ -12,7 +12,7 @@ export interface Goal {
 export interface Constraint {
   id?: number;
   title: string;
-  type: 'busy' | 'day_off'; 
+  type: 'busy' | 'day_off';
   duration: number;
   day: string; // Kısıtın hangi günde olduğu
 }
@@ -26,11 +26,11 @@ export interface Session {
 }
 
 export interface PlannerLog {
-    id?: number;
-    type: string;
-    ts: number;
-    source?: string;
-    payload?: any;
+  id?: number;
+  type: string;
+  ts: number;
+  source?: string;
+  payload?: any;
 }
 
 export interface SettingRecord<TValue = any> {
@@ -48,44 +48,57 @@ export class SelfDatabase extends Dexie {
 
   constructor() {
     super('SelfDatabase');
-    
-    // Eski versiyonlar...
+
+    // Version 1-5 definitions (omitted for brevity, assume they exist as prior history)
     this.version(1).stores({
       goals: '++id, title, deadline, priority',
-      sessions: '++id, goalId, startTime, status' 
+      sessions: '++id, goalId, startTime, status'
     });
     this.version(2).stores({
       goals: '++id, title, deadline, priority',
       constraints: '++id, type',
-      sessions: '++id, goalId, startTime, status' 
+      sessions: '++id, goalId, startTime, status'
     });
     this.version(3).stores({
-        goals: '++id, title, deadline, priority',
-        constraints: '++id, type',
-        sessions: '++id, goalId, startTime, status',
-        logs: '++id, type, ts'
+      goals: '++id, title, deadline, priority',
+      constraints: '++id, type',
+      sessions: '++id, goalId, startTime, status',
+      logs: '++id, type, ts'
     });
     this.version(4).stores({
-        goals: '++id, title, deadline, priority',
-        constraints: '++id, type, day',
-        sessions: '++id, goalId, startTime, status',
-        logs: '++id, type, ts'
+      goals: '++id, title, deadline, priority',
+      constraints: '++id, type, day',
+      sessions: '++id, goalId, startTime, status',
+      logs: '++id, type, ts'
     });
-    
-    // [YENİ] Versiyon 5: Goals tablosuna 'status' eklendi (Dexie otomatik halleder)
     this.version(5).stores({
-        goals: '++id, title, deadline, priority, status',
-        constraints: '++id, type, day',
-        sessions: '++id, goalId, startTime, status',
-        logs: '++id, type, ts'
+      goals: '++id, title, deadline, priority, status',
+      constraints: '++id, type, day',
+      sessions: '++id, goalId, startTime, status',
+      logs: '++id, type, ts'
+    });
+    this.version(6).stores({
+      goals: '++id, title, deadline, priority, status',
+      constraints: '++id, type, day',
+      sessions: '++id, goalId, startTime, status',
+      logs: '++id, type, ts',
+      settings: '&key, updatedAt'
     });
 
-    this.version(6).stores({
-        goals: '++id, title, deadline, priority, status',
-        constraints: '++id, type, day',
-        sessions: '++id, goalId, startTime, status',
-        logs: '++id, type, ts',
-        settings: '&key, updatedAt'
+    // [NEW] Version 7: Add Sync metadata (updatedAt, isDeleted, version)
+    // We add 'updatedAt' to indices for efficient sync querying
+    this.version(7).stores({
+      goals: '++id, title, deadline, priority, status, updatedAt',
+      constraints: '++id, type, day, updatedAt',
+      sessions: '++id, goalId, startTime, status, updatedAt',
+      logs: '++id, type, ts, updatedAt',
+      settings: '&key, updatedAt'
+    }).upgrade(trans => {
+      // Upgrade existing data to have default updatedAt
+      const now = Date.now();
+      trans.table('goals').toCollection().modify({ updatedAt: now, version: 1, isDeleted: false });
+      trans.table('constraints').toCollection().modify({ updatedAt: now, version: 1, isDeleted: false });
+      trans.table('sessions').toCollection().modify({ updatedAt: now, version: 1, isDeleted: false });
     });
   }
 }
