@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/db';
+import { db, softDeleteConstraint } from '../db/db';
 import TaskActionMenu from './TaskActionMenu';
 
 export default function GoalManager() {
@@ -15,7 +15,7 @@ export default function GoalManager() {
 
   // SORGULAR
   const goalsWithProgress = useLiveQuery(async () => {
-    const goals = await db.goals.toArray();
+    const goals = await db.goals.filter(g => !g.isDeleted).toArray();
     const sessions = await db.sessions.toArray();
 
     return goals.map(g => {
@@ -30,7 +30,7 @@ export default function GoalManager() {
     });
   });
 
-  const constraints = useLiveQuery(() => db.constraints?.toArray() ?? []);
+  const constraints = useLiveQuery(() => db.constraints?.filter(c => !c.isDeleted).toArray() ?? []);
 
   // --- ACTIONS ---
   const addGoal = async () => {
@@ -153,7 +153,7 @@ export default function GoalManager() {
                   </div>
                 </div>
                 <button
-                  onClick={() => db.constraints.delete(c.id!)}
+                  onClick={() => softDeleteConstraint(c.id!)}
                   className="text-gray-300 hover:text-red-500 transition p-2"
                   title="Sil"
                 >

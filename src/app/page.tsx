@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic';
 import ServiceWorkerManager from '../components/ServiceWorkerManager';
 import ConnectionStatusBanner from '../components/ConnectionStatusBanner';
+import PeerConnectionPanel from '../components/PeerConnectionPanel';
 
 // Heavy components are loaded dynamically to improve initial load
 const GoalManager = dynamic(() => import('../components/GoalManager'), {
@@ -38,6 +39,11 @@ export default function Home() {
 
             {/* CRUD ekranı */}
             <GoalManager />
+
+            {/* P2P Cihaz Senkronizasyonu */}
+            <div className="max-w-2xl mx-auto px-4 mt-8">
+                <PeerConnectionPanel />
+            </div>
 
             {/* Pomodoro zamanlayıcı */}
             <div className="mt-16 border-t pt-10">

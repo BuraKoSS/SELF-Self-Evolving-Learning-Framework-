@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { db } from '../db/db';
+import { db, softDeleteGoal } from '../db/db';
 import { logEvent } from '../observer/logging';
 import { EVENT_TYPES } from '../observer/events';
 import { POSTPONE_REASONS, PostponeReason, PostponePayload, CancelPayload } from '../types/analytics';
@@ -21,7 +21,7 @@ export default function TaskActionMenu({ goalId, goalTitle, currentStatus }: Pro
         await db.goals.update(goalId, { status: 'active' });
         // Log atmak isterseniz (Opsiyonel):
         // await logEvent(EVENT_TYPES.GOAL_UPDATED, { goalId, status: 'active' }, 'TaskActionMenu');
-        
+
         alert(`"${goalTitle}" tekrar aktif edildi.`);
         setIsOpen(false);
     };
@@ -33,7 +33,7 @@ export default function TaskActionMenu({ goalId, goalTitle, currentStatus }: Pro
         };
         await logEvent(EVENT_TYPES.POSTPONE, payload, 'TaskActionMenu');
         await db.goals.update(goalId, { status: 'postponed' });
-        
+
         setIsOpen(false);
         setMode('menu');
     };
@@ -43,14 +43,14 @@ export default function TaskActionMenu({ goalId, goalTitle, currentStatus }: Pro
 
         const payload: CancelPayload = { goalId };
         await logEvent(EVENT_TYPES.CANCEL, payload, 'TaskActionMenu');
-        await db.goals.delete(goalId);
+        await softDeleteGoal(goalId);
 
         setIsOpen(false);
     };
 
     return (
         <div className="relative inline-block ml-2 z-50">
-            <button 
+            <button
                 onClick={() => setIsOpen(!isOpen)}
                 className="text-gray-400 hover:text-blue-600 font-bold px-2 py-0.5 text-lg"
             >
@@ -63,29 +63,29 @@ export default function TaskActionMenu({ goalId, goalTitle, currentStatus }: Pro
                         <div className="flex flex-col">
                             {/* [YENİ] Eğer ertelenmişse 'Askıdan Al' göster, değilse 'Ertele' göster */}
                             {currentStatus === 'postponed' ? (
-                                <button 
+                                <button
                                     onClick={handleResume}
                                     className="text-left px-4 py-3 text-sm text-green-700 hover:bg-green-50 border-b border-gray-100 transition font-semibold"
                                 >
                                     ▶️ Askıdan Al (Aktif Et)
                                 </button>
                             ) : (
-                                <button 
+                                <button
                                     onClick={() => setMode('reasons')}
                                     className="text-left px-4 py-3 text-sm text-yellow-700 hover:bg-yellow-50 border-b border-gray-100 transition"
                                 >
                                     🕒 Ertele (Askıya Al)
                                 </button>
                             )}
-                            
-                            <button 
+
+                            <button
                                 onClick={handleCancel}
                                 className="text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 border-b border-gray-100 transition"
                             >
                                 🚫 İptal Et (Sil)
                             </button>
-                            <button 
-                                onClick={() => setIsOpen(false)} 
+                            <button
+                                onClick={() => setIsOpen(false)}
                                 className="text-left px-4 py-2 text-xs text-gray-400 hover:bg-gray-50"
                             >
                                 Vazgeç
@@ -103,8 +103,8 @@ export default function TaskActionMenu({ goalId, goalTitle, currentStatus }: Pro
                                     {label}
                                 </button>
                             ))}
-                            <button 
-                                onClick={() => setMode('menu')} 
+                            <button
+                                onClick={() => setMode('menu')}
                                 className="block w-full text-left px-4 py-2 text-xs text-gray-500 hover:text-gray-700"
                             >
                                 ← Geri Dön

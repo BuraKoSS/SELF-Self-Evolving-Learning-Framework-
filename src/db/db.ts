@@ -6,7 +6,9 @@ export interface Goal {
   targetHours: number;
   priority: 'low' | 'medium' | 'high';
   deadline?: Date;
-  status?: 'active' | 'postponed' | 'completed'; // [YENİ] Durum alanı
+  status?: 'active' | 'postponed' | 'completed';
+  updatedAt?: number;
+  isDeleted?: boolean;
 }
 
 export interface Constraint {
@@ -14,7 +16,9 @@ export interface Constraint {
   title: string;
   type: 'busy' | 'day_off';
   duration: number;
-  day: string; // Kısıtın hangi günde olduğu
+  day: string;
+  updatedAt?: number;
+  isDeleted?: boolean;
 }
 
 export interface Session {
@@ -23,6 +27,7 @@ export interface Session {
   startTime: Date;
   duration: number;
   status: 'completed' | 'interrupted';
+  updatedAt?: number;
 }
 
 export interface PlannerLog {
@@ -31,12 +36,28 @@ export interface PlannerLog {
   ts: number;
   source?: string;
   payload?: any;
+  updatedAt?: number;
 }
 
 export interface SettingRecord<TValue = any> {
   key: string;
   value: TValue;
   updatedAt: number;
+}
+
+// Sync event callback type
+type SyncCallback = () => void;
+let syncCallbacks: SyncCallback[] = [];
+
+export function onDatabaseChange(callback: SyncCallback): () => void {
+  syncCallbacks.push(callback);
+  return () => {
+    syncCallbacks = syncCallbacks.filter(cb => cb !== callback);
+  };
+}
+
+function notifyDatabaseChange() {
+  syncCallbacks.forEach(cb => cb());
 }
 
 export class SelfDatabase extends Dexie {
@@ -100,7 +121,74 @@ export class SelfDatabase extends Dexie {
       trans.table('constraints').toCollection().modify({ updatedAt: now, version: 1, isDeleted: false });
       trans.table('sessions').toCollection().modify({ updatedAt: now, version: 1, isDeleted: false });
     });
+
+    // Add middleware to auto-set updatedAt and trigger sync on changes
+    this.use({
+      stack: 'dbcore',
+      name: 'syncMiddleware',
+      create: (downlevelDatabase) => ({
+        ...downlevelDatabase,
+        table: (tableName) => {
+          const downlevelTable = downlevelDatabase.table(tableName);
+          return {
+            ...downlevelTable,
+            mutate: async (req) => {
+              // Set updatedAt for creating/updating operations
+              if (req.type === 'add' || req.type === 'put') {
+                const now = Date.now();
+                if (Array.isArray(req.values)) {
+                  req.values = req.values.map((val: any) => ({
+                    ...val,
+                    updatedAt: now
+                  }));
+                }
+              }
+
+              // Execute the mutation
+              const result = await downlevelTable.mutate(req);
+
+              // Notify listeners after successful mutation (for sync)
+              // Skip logs table to avoid sync loops
+              if (tableName !== 'logs' && result.numFailures === 0) {
+                // Use setTimeout to avoid blocking the mutation
+                setTimeout(() => notifyDatabaseChange(), 0);
+              }
+
+              return result;
+            }
+          };
+        }
+      })
+    });
   }
 }
 
 export const db = new SelfDatabase();
+
+// ============ SOFT DELETE HELPERS ============
+// These functions mark items as deleted instead of removing them,
+// allowing the deletion to sync across devices.
+
+export async function softDeleteGoal(id: number): Promise<void> {
+  await db.goals.update(id, {
+    isDeleted: true,
+    updatedAt: Date.now()
+  });
+}
+
+export async function softDeleteConstraint(id: number): Promise<void> {
+  await db.constraints.update(id, {
+    isDeleted: true,
+    updatedAt: Date.now()
+  });
+}
+
+// Helper to get only active (non-deleted) goals
+export function getActiveGoals() {
+  return db.goals.filter(g => !g.isDeleted).toArray();
+}
+
+// Helper to get only active (non-deleted) constraints
+export function getActiveConstraints() {
+  return db.constraints.filter(c => !c.isDeleted).toArray();
+}
