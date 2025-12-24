@@ -354,8 +354,9 @@ function buildWeeklyPlan(
 // ---------------- Component ----------------
 
 export default function WeeklyPlanner() {
-  const goals = useLiveQuery(() => db.goals.toArray());
-  const constraints = useLiveQuery(() => db.constraints?.toArray() ?? []);
+  // Filter out soft-deleted goals and constraints
+  const goals = useLiveQuery(() => db.goals.filter(g => !g.isDeleted).toArray());
+  const constraints = useLiveQuery(() => db.constraints?.filter(c => !c.isDeleted).toArray() ?? []);
 
   const [plan, setPlan] = useState<DayPlan[]>([]);
   const [policy, setPolicy] = useState<WeeklyPlannerPolicy>(

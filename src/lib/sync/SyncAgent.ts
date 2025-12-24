@@ -134,8 +134,12 @@ export class SyncAgent {
                     debug: 1 // 0: none, 1: errors, 2: warnings, 3: all
                 });
 
-                this.peer.on('open', (id) => {
+                this.peer.on('open', async (id) => {
                     console.log('[SyncAgent] Connected to signaling server with ID:', id);
+
+                    // Initialize encryption key
+                    await this.initializeEncryptionKey();
+
                     this.isInitialized = true;
                     this.emit({ type: 'open', peerId: id });
 
@@ -182,6 +186,41 @@ export class SyncAgent {
         });
 
         return this.initPromise;
+    }
+
+    /**
+     * Initialize or load encryption key from localStorage
+     * Encryption is optional - sync will work without it if initialization fails
+     */
+    private async initializeEncryptionKey(): Promise<void> {
+        if (typeof window === 'undefined') return;
+
+        // Check if crypto API is available
+        if (!window.crypto || !window.crypto.subtle) {
+            console.warn('[SyncAgent] Web Crypto API not available, encryption disabled');
+            return;
+        }
+
+        const ENCRYPTION_KEY_STORAGE = 'self-encryption-key';
+
+        try {
+            const storedKey = localStorage.getItem(ENCRYPTION_KEY_STORAGE);
+
+            if (storedKey) {
+                // Import existing key
+                this.encryptionKey = await EncryptionManager.importKey(storedKey);
+                console.log('[SyncAgent] Loaded existing encryption key');
+            } else {
+                // Generate new key
+                this.encryptionKey = await EncryptionManager.generateKey();
+                const exportedKey = await EncryptionManager.exportKey(this.encryptionKey);
+                localStorage.setItem(ENCRYPTION_KEY_STORAGE, exportedKey);
+                console.log('[SyncAgent] Generated new encryption key');
+            }
+        } catch (err) {
+            console.warn('[SyncAgent] Encryption initialization failed, continuing without encryption:', err);
+            this.encryptionKey = null; // Disable encryption on failure
+        }
     }
 
     /**
@@ -441,7 +480,18 @@ export class SyncAgent {
         this.isReceivingSync = true;
 
         try {
-            const data = JSON.parse(msg);
+            let data = JSON.parse(msg);
+
+            // Decrypt if message is encrypted
+            if (data.encrypted && data.data && this.encryptionKey) {
+                try {
+                    data = await EncryptionManager.decrypt(data.data, this.encryptionKey);
+                    console.log('[SyncAgent] Decrypted incoming message from:', fromPeerId);
+                } catch (decryptErr) {
+                    console.error('[SyncAgent] Failed to decrypt message (key mismatch?):', decryptErr);
+                    return; // Skip if decryption fails
+                }
+            }
 
             if (data.type === 'SYNC_DATA') {
                 const syncedData: any = {};
@@ -556,7 +606,7 @@ export class SyncAgent {
             const packet = {
                 type: 'SYNC_DATA',
                 source: this.deviceId,
-                isResponse: isResponse, // Mark as response to prevent ping-pong
+                isResponse: isResponse,
                 payload: {
                     goals: goals,
                     constraints: constraints,
@@ -565,7 +615,14 @@ export class SyncAgent {
                 timestamp: Date.now()
             };
 
-            conn.send(JSON.stringify(packet));
+            // Encrypt data if encryption key is available
+            if (this.encryptionKey) {
+                const encrypted = await EncryptionManager.encrypt(packet, this.encryptionKey);
+                conn.send(JSON.stringify({ encrypted: true, data: encrypted }));
+                console.log(`[SyncAgent] Sent ENCRYPTED sync ${isResponse ? 'response' : 'request'} to ${peerId}`);
+            } else {
+                conn.send(JSON.stringify(packet));
+            }
             console.log(`[SyncAgent] Sent sync ${isResponse ? 'response' : 'request'} to ${peerId}`);
         } catch (err) {
             console.error('[SyncAgent] Failed to send sync to:', peerId, err);
