@@ -6,9 +6,9 @@ import { db, Goal, Constraint } from "../db/db";
 import { logEvent } from "../observer/logging";
 import { EVENT_TYPES } from "../observer/events";
 import {
-  getWeeklyPlannerPolicy,
   patchWeeklyPlannerPolicy,
 } from "../tuner/settingsStore";
+import { SyncAgent } from "../lib/sync/SyncAgent";
 import {
   DEFAULT_WEEKLY_PLANNER_POLICY,
   WeeklyPlannerPolicy,
@@ -374,11 +374,18 @@ export default function WeeklyPlanner() {
     setGuardianIssues(issues);
   }, [plan, goals, constraints, policy.maxStudyMinutesPerDay]);
 
+  // Live query for policy settings - auto-updates when synced from other device
+  const policyRecord = useLiveQuery(
+    () => db.settings.get('weeklyPlannerPolicy'),
+    []
+  );
+
+  // Update local policy state when policyRecord changes (from sync or local update)
   useEffect(() => {
-    getWeeklyPlannerPolicy()
-      .then(setPolicy)
-      .catch(() => setPolicy(DEFAULT_WEEKLY_PLANNER_POLICY));
-  }, []);
+    if (policyRecord?.value) {
+      setPolicy({ ...DEFAULT_WEEKLY_PLANNER_POLICY, ...policyRecord.value });
+    }
+  }, [policyRecord]);
 
   useEffect(() => {
     if (goals && constraints) {
@@ -572,6 +579,12 @@ export default function WeeklyPlanner() {
             TunerAgent Policy (WeeklyPlanner)
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => SyncAgent.getInstance().sync()}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700"
+            >
+              🔄 Sync Settings
+            </button>
             <button
               onClick={runAutoTune}
               className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
