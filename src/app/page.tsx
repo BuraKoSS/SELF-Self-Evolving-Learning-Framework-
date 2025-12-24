@@ -23,6 +23,10 @@ const AnalyticsDashboard = dynamic(
     () => import('../components/AnalyticsDashboard'),
     { ssr: false }
 );
+const ExportImportPanel = dynamic(
+    () => import('../components/ExportImportPanel'),
+    { ssr: false }
+);
 
 export default function Home() {
     return (
@@ -39,6 +43,11 @@ export default function Home() {
 
             {/* CRUD ekranı */}
             <GoalManager />
+
+            {/* Export/Import Panel */}
+            <div className="px-4 mt-8">
+                <ExportImportPanel />
+            </div>
 
             {/* P2P Cihaz Senkronizasyonu */}
             <div className="max-w-2xl mx-auto px-4 mt-8">

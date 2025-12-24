@@ -20,6 +20,7 @@ import { SchedulerRule, SlotRationale, createRationale } from "../scheduler/rule
 import { Slot, SlotType, DayPlan } from "../types/plan";
 import { analyzePlan } from "../guardian/GuardianAgent";
 import { GuardianIssue } from "../guardian/types";
+import { downloadICS } from "../lib/exportImport";
 
 const WEEK_DAYS = [
   "Pazartesi",
@@ -579,7 +580,7 @@ export default function WeeklyPlanner() {
           <div className="text-sm font-semibold text-gray-800">
             TunerAgent Policy (WeeklyPlanner)
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => SyncAgent.getInstance().sync()}
               className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700"
@@ -591,6 +592,14 @@ export default function WeeklyPlanner() {
               className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
             >
               Auto-tune (last 7 days logs)
+            </button>
+            <button
+              onClick={() => downloadICS(plan)}
+              disabled={plan.length === 0}
+              className="px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-semibold hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Haftalık planı takvim dosyası olarak indir"
+            >
+              📅 Takvime Aktar
             </button>
             <span className="text-[11px] text-gray-500">{tuneStatus}</span>
           </div>
