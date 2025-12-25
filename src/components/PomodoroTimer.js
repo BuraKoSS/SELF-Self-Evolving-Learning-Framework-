@@ -14,10 +14,13 @@ export default function PomodoroTimer() {
 
     const [timeLeft, setTimeLeft] = useState(workDuration);
     const [isRunning, setIsRunning] = useState(false);
-    const [mode, setMode] = useState("work"); 
-    
+    const [mode, setMode] = useState("work");
+
     const [selectedGoalId, setSelectedGoalId] = useState("");
-    const goals = useLiveQuery(() => db.goals.toArray());
+    // Filter out deleted and postponed goals - only show active goals
+    const goals = useLiveQuery(() =>
+        db.goals.filter(g => !g.isDeleted && g.status !== 'postponed').toArray()
+    );
 
     useEffect(() => {
         const prefs = tunePomodoroSettings();
@@ -40,7 +43,7 @@ export default function PomodoroTimer() {
         if (timeLeft === 0 && isRunning) {
             handleComplete();
         }
-    }, [timeLeft, isRunning]); 
+    }, [timeLeft, isRunning]);
 
     const handleComplete = async () => {
         setIsRunning(false);
@@ -110,7 +113,7 @@ export default function PomodoroTimer() {
         savePrefs(prefs);
 
         setIsRunning(true);
-        setTimeLeft(0); 
+        setTimeLeft(0);
     };
 
     const format = (sec) => {
@@ -136,7 +139,7 @@ export default function PomodoroTimer() {
 
             {mode === "work" && (
                 <div className="mb-4">
-                    <select 
+                    <select
                         className="w-full p-2 border rounded bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none"
                         value={selectedGoalId}
                         onChange={(e) => setSelectedGoalId(e.target.value)}
@@ -157,23 +160,22 @@ export default function PomodoroTimer() {
             </div>
 
             <div className="flex gap-2 justify-center flex-wrap">
-                <button 
+                <button
                     onClick={toggleTimer}
-                    className={`px-6 py-2 rounded-full text-white font-bold shadow-md ${
-                        isRunning ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-600 hover:bg-blue-700'
-                    }`}
+                    className={`px-6 py-2 rounded-full text-white font-bold shadow-md ${isRunning ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-600 hover:bg-blue-700'
+                        }`}
                 >
                     {isRunning ? "Duraklat" : "Başlat"}
                 </button>
 
-                <button 
+                <button
                     onClick={resetTimer}
                     className="px-6 py-2 rounded-full bg-gray-200 text-gray-700 font-semibold hover:bg-gray-300"
                 >
                     Sıfırla
                 </button>
 
-                <button 
+                <button
                     onClick={forceFinish}
                     className="px-4 py-2 rounded-full bg-purple-100 text-purple-700 font-bold text-xs hover:bg-purple-200 border border-purple-300"
                     title="Geliştirici Test Butonu"
